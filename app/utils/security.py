@@ -1,6 +1,7 @@
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from app.config import get_settings
@@ -8,16 +9,25 @@ from app.database import db
 from app.utils.object_id import serialize_document
 
 settings = get_settings()
-password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+HASH_ITERATIONS = 120_000
 
 
 def hash_password(password: str) -> str:
-    return password_context.hash(password)
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), HASH_ITERATIONS)
+    return f"pbkdf2_sha256${HASH_ITERATIONS}${salt}${digest.hex()}"
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return password_context.verify(password, password_hash)
+    try:
+      algorithm, iterations, salt, stored_digest = password_hash.split("$", 3)
+      if algorithm != "pbkdf2_sha256":
+          return False
+      digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), int(iterations))
+      return secrets.compare_digest(digest.hex(), stored_digest)
+    except ValueError:
+      return False
 
 
 def create_access_token(subject: str) -> str:
